@@ -10,9 +10,11 @@ import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.waiters.WaiterResponse;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.waiters.S3Waiter;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -44,6 +46,8 @@ public class EventHandler implements RequestHandler<ScheduledEvent, String> {
     public String handleRequest(ScheduledEvent scheduledEvent, Context context) {
 
         final LambdaLogger logger = context.getLogger();
+        String test = null;
+        logger.log(test.toLowerCase());
         try {
             processShipmentUpdates(logger);
             return "SUCCESS";
@@ -72,28 +76,17 @@ public class EventHandler implements RequestHandler<ScheduledEvent, String> {
         //EventHandler.getS3Client().putObject(Constants.SUMMARY_BUCKET, summaryUpdateName, latestStatusForTrackingNumber.toString());
         PutObjectRequest putObjectRequest = PutObjectRequest.builder().bucket(Constants.SUMMARY_BUCKET).key(summaryUpdateName).build();
         EventHandler.getS3Client().putObject(putObjectRequest, RequestBody.fromString(latestStatusForTrackingNumber.toString()));
-        
-        long expirationTime = System.currentTimeMillis() + Duration.ofMinutes(1).toMillis();
-        while (System.currentTimeMillis() < expirationTime) {
-            HeadObjectRequest headObjectRequest = HeadObjectRequest.builder().bucket(Constants.SUMMARY_BUCKET).key(summaryUpdateName).build();
-            HeadObjectResponse headObjectResponse = s3Client.headObject(headObjectRequest);
-            if (StringUtils.isNotBlank(headObjectResponse.eTag())) {
-                break;
-            }
-            logger.log("waiting for file to be created " + summaryUpdateName);
-            Thread.sleep(1000);
-        }
-        
-        // Before we delete the shipment updates make sure the summary update file exists
+
+        //Using S3 Waiter to ensure that the object exists in the best way
+        S3Waiter waiter = s3Client.waiter();
         HeadObjectRequest headObjectRequest = HeadObjectRequest.builder().bucket(Constants.SUMMARY_BUCKET).key(summaryUpdateName).build();
-        HeadObjectResponse headObjectResponse = s3Client.headObject(headObjectRequest);
-        if (StringUtils.isNotBlank(headObjectResponse.eTag())) {
+        WaiterResponse<HeadObjectResponse> waiterResponse = waiter.waitUntilObjectExists(headObjectRequest);
+        if (waiterResponse.matched().response().isPresent()) {
             deleteProcessedFiles(filesToDelete);
             logger.log("All updates successfully processed");
         } else {
             throw new RuntimeException("Failed to write summary status, will be retried in 15 minutes");
         }
-        
     }
 
     private List<ObjectIdentifier> processEventsInBucket(String bucketName, LambdaLogger logger, Map<String, Pair<Long, String>> latestStatusForTrackingNumber) {
