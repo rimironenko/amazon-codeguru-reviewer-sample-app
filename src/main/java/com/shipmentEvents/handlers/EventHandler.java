@@ -46,6 +46,8 @@ public class EventHandler implements RequestHandler<ScheduledEvent, String> {
     public String handleRequest(ScheduledEvent scheduledEvent, Context context) {
 
         final LambdaLogger logger = context.getLogger();
+        String test = null;
+        logger.log(test.toLowerCase());
         try {
             processShipmentUpdates(logger);
             return "SUCCESS";
